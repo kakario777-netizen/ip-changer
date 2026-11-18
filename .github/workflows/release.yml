@@ -6,23 +6,27 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: release
+  cancel-in-progress: true
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Read version
         id: ver
-        run: echo "v=$(grep -oP 'AssemblyVersion\("\K[0-9]+\.[0-9]+\.[0-9]+' src/IpChanger.cs)" >> "$GITHUB_OUTPUT"
-      - name: Install Mono
-        run: sudo apt-get update -q && sudo apt-get install -y -q mono-mcs mono-devel zip
-      - name: Build
+        shell: pwsh
         run: |
-          mcs -target:winexe -platform:anycpu -sdk:4.5 -out:IpChanger.exe -win32icon:src/app.ico \
-            -r:System.Windows.Forms -r:System.Drawing -r:System.Management \
-            -resource:adb/adb.exe,adb.exe -resource:adb/AdbWinApi.dll,AdbWinApi.dll -resource:adb/AdbWinUsbApi.dll,AdbWinUsbApi.dll \
-            -codepage:utf8 src/IpChanger.cs
-          zip IpChanger.zip IpChanger.exe
+          $m = Select-String -Path src/IpChanger.cs -Pattern 'AssemblyVersion\("(\d+\.\d+\.\d+)' | Select-Object -First 1
+          "v=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+      - name: Build
+        shell: cmd
+        run: |
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /platform:anycpu /out:IpChanger.exe /win32icon:src\app.ico /codepage:65001 /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /resource:adb\adb.exe,adb.exe /resource:adb\AdbWinApi.dll,AdbWinApi.dll /resource:adb\AdbWinUsbApi.dll,AdbWinUsbApi.dll src\IpChanger.cs
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path IpChanger.exe -DestinationPath IpChanger.zip
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.v }}
