@@ -1,7 +1,9 @@
 name: release
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: ['src/**', '.github/workflows/release.yml']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -9,12 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Read version
+        id: ver
+        run: echo "v=$(grep -oP 'AssemblyVersion\("\K[0-9]+\.[0-9]+\.[0-9]+' src/IpChanger.cs)" >> "$GITHUB_OUTPUT"
       - name: Install Mono
         run: sudo apt-get update -q && sudo apt-get install -y -q mono-mcs mono-devel zip
       - name: Build
         run: |
-          VER="${GITHUB_REF_NAME#v}"
-          sed -i "s/AssemblyVersion(\"[0-9.]*\")/AssemblyVersion(\"${VER}.0\")/" src/IpChanger.cs
           mcs -target:winexe -platform:anycpu -sdk:4.5 -out:IpChanger.exe -win32icon:src/app.ico \
             -r:System.Windows.Forms -r:System.Drawing -r:System.Management \
             -resource:adb/adb.exe,adb.exe -resource:adb/AdbWinApi.dll,AdbWinApi.dll -resource:adb/AdbWinUsbApi.dll,AdbWinUsbApi.dll \
@@ -22,7 +25,10 @@ jobs:
           zip IpChanger.zip IpChanger.exe
       - uses: softprops/action-gh-release@v2
         with:
-          name: 아이피 변경 ${{ github.ref_name }}
+          tag_name: v${{ steps.ver.outputs.v }}
+          target_commitish: ${{ github.sha }}
+          name: 아이피 변경 v${{ steps.ver.outputs.v }}
+          make_latest: true
           body: |
             - IpChanger.exe 하나만 받아서 실행하면 됩니다 (설치 없음)
             - 이미 쓰고 있다면 유선 모뎀 사용 중일 때 자동으로 업데이트됩니다
