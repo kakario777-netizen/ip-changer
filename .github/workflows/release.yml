@@ -1,0 +1,53 @@
+name: release
+# main에 올렸을 때, 소스의 버전 번호가 새 버전일 때만 빌드·릴리스 (풀 리퀘스트로는 실행 안 됨)
+on:
+  push:
+    branches: [main]
+    paths: ['src/**']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository_owner == 'kakario777-netizen'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version / skip if already released
+        id: ver
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $m = Select-String -Path src/IpChanger.cs -Pattern 'AssemblyVersion\("(\d+\.\d+\.\d+)' | Select-Object -First 1
+          $v = $m.Matches[0].Groups[1].Value
+          "v=$v" >> $env:GITHUB_OUTPUT
+          gh release view "v$v" --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { "skip=true" >> $env:GITHUB_OUTPUT; Write-Host "v$v 이미 릴리스됨 - 건너뜀" } else { "skip=false" >> $env:GITHUB_OUTPUT }
+          exit 0
+      - name: Build
+        if: steps.ver.outputs.skip == 'false'
+        shell: cmd
+        run: |
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /platform:anycpu /out:IpChanger.exe /win32icon:src\app.ico /codepage:65001 /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /resource:adb\adb.exe,adb.exe /resource:adb\AdbWinApi.dll,AdbWinApi.dll /resource:adb\AdbWinUsbApi.dll,AdbWinUsbApi.dll src\IpChanger.cs
+      - name: Zip
+        if: steps.ver.outputs.skip == 'false'
+        shell: pwsh
+        run: Compress-Archive -Path IpChanger.exe -DestinationPath IpChanger.zip
+      - uses: softprops/action-gh-release@v2
+        if: steps.ver.outputs.skip == 'false'
+        with:
+          tag_name: v${{ steps.ver.outputs.v }}
+          target_commitish: ${{ github.sha }}
+          name: 아이피 변경 v${{ steps.ver.outputs.v }}
+          make_latest: true
+          body: |
+            - 업데이트 받는 주소를 내 저장소 릴리스로만 제한 (보안)
+            - IpChanger.exe 하나만 받아서 실행하면 됩니다 (설치 없음)
+            - 이미 쓰고 있다면 유선 모뎀 사용 중일 때 자동으로 업데이트됩니다
+          files: |
+            IpChanger.exe
+            IpChanger.zip
