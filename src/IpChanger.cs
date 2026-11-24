@@ -645,7 +645,7 @@ namespace IpChanger
         }
 
         // ---------- 자동 업데이트 (GitHub 릴리스) ----------
-        const string RepoApi = "https://api.github.com/repos/kakario777-netizen/ip-changer-release/releases/latest";
+        const string RepoApi = "https://api.github.com/repos/kakario777-netizen/ip-changer/releases/latest";
         System.Threading.Timer updTimer;
         int updating;
 
@@ -673,6 +673,8 @@ namespace IpChanger
                 var tm = System.Text.RegularExpressions.Regex.Match(json, "\"tag_name\"\\s*:\\s*\"v?([0-9.]+)\"");
                 var um = System.Text.RegularExpressions.Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.exe)\"");
                 if (!tm.Success || !um.Success) return;
+                // 내 저장소 릴리스의 HTTPS 주소에서만 받음
+                if (!um.Groups[1].Value.StartsWith("https://github.com/kakario777-netizen/ip-changer/releases/download/")) { Log("업데이트 주소가 올바르지 않아 건너뜀"); return; }
                 Version latest = new Version(tm.Groups[1].Value), cur = new Version(Version);
                 if (latest <= cur) return;
 

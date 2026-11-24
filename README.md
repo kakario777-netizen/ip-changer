@@ -6,4 +6,4 @@ USB로 연결한 폰의 비행기모드를 껐다 켜서 테더링 아이피를 
 - 작업표시줄 상태 상자 (유선 초록 / 테더링 보라 + 응답속도)
 - 알림 영역 상주, GitHub 릴리스 자동 업데이트
 
-받기: [ip-changer-release](https://github.com/kakario777-netizen/ip-changer-release/releases/latest) 에서 `IpChanger.exe`
+받기: [Releases](../../releases/latest) 에서 `IpChanger.exe`
