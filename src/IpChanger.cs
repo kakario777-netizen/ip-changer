@@ -15,7 +15,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("아이피 변경")]
 [assembly: AssemblyProduct("아이피 변경")]
-[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
 
 namespace IpChanger
 {
@@ -645,7 +645,7 @@ namespace IpChanger
         }
 
         // ---------- 자동 업데이트 (GitHub 릴리스) ----------
-        const string RepoApi = "https://api.github.com/repos/kakario777-netizen/ip-changer/releases/latest";
+        const string RepoApi = "https://api.github.com/repos/kakario777-netizen/ip-changer-release/releases/latest";
         System.Threading.Timer updTimer;
         int updating;
 
