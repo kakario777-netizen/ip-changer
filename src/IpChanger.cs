@@ -15,7 +15,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("아이피 변경")]
 [assembly: AssemblyProduct("아이피 변경")]
-[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyVersion("1.3.2.0")]
 
 namespace IpChanger
 {
@@ -331,11 +331,57 @@ namespace IpChanger
 
         int S(float v) { return (int)Math.Round(v * sc); }
 
-        public void SetStatus(string t, Color c)
+        string compact = "", shown = "";
+        public void SetStatus(string t, string shortText, Color c)
         {
-            if (t == text && c == color) return;
-            text = t; color = c;
+            if (t == text && shortText == compact && c == color) return;
+            text = t; compact = shortText; color = c;
             Invalidate();
+        }
+
+        // ---- 작업표시줄 앱 아이콘 위치 읽기 (2초마다, 별도 스레드) ----
+        volatile int iconsLeft = -1, iconsRight = -1;   // -1 = 모름
+        Thread scanner;
+
+        void StartScanner()
+        {
+            if (scanner != null) return;
+            scanner = new Thread(() =>
+            {
+                while (true)
+                {
+                    try { ScanTaskbar(); } catch { iconsLeft = -1; iconsRight = -1; }
+                    Thread.Sleep(2000);
+                }
+            }) { IsBackground = true };
+            scanner.SetApartmentState(ApartmentState.MTA);
+            scanner.Start();
+        }
+
+        void ScanTaskbar()
+        {
+            IntPtr tbw = FindWindow("Shell_TrayWnd", null);
+            RECT tb, nr;
+            if (tbw == IntPtr.Zero || !GetWindowRect(tbw, out tb)) { iconsLeft = iconsRight = -1; return; }
+            IntPtr nw = FindWindowEx(tbw, IntPtr.Zero, "TrayNotifyWnd", null);
+            int trayLeft = (nw != IntPtr.Zero && GetWindowRect(nw, out nr) && nr.R - nr.L > 0) ? nr.L : tb.R - S(240);
+
+            System.Windows.Automation.AutomationElement root = System.Windows.Automation.AutomationElement.FromHandle(tbw);
+            var cond = new System.Windows.Automation.PropertyCondition(
+                System.Windows.Automation.AutomationElement.ControlTypeProperty, System.Windows.Automation.ControlType.Button);
+            var all = root.FindAll(System.Windows.Automation.TreeScope.Descendants, cond);
+            int minL = int.MaxValue, maxR = -1;
+            foreach (System.Windows.Automation.AutomationElement el in all)
+            {
+                System.Windows.Rect r = el.Current.BoundingRectangle;
+                if (r.IsEmpty || r.Width < 2 || r.Height < 2) continue;
+                if (r.Right > trayLeft + 2) continue;            // 알림 영역 쪽 버튼은 제외
+                if (r.Bottom < tb.T || r.Top > tb.B) continue;   // 다른 모니터 작업표시줄 제외
+                minL = Math.Min(minL, (int)r.Left);
+                maxR = Math.Max(maxR, (int)r.Right);
+            }
+            if (maxR < 0) { iconsLeft = iconsRight = -1; return; }
+            iconsLeft = minL; iconsRight = maxR;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -345,7 +391,7 @@ namespace IpChanger
             using (SolidBrush b = new SolidBrush(color)) g.FillRectangle(b, ClientRectangle);
             using (Pen p = new Pen(Color.FromArgb(70, 255, 255, 255))) g.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
             using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
-                g.DrawString(text, Font, Brushes.White, ClientRectangle, sf);
+                g.DrawString(shown.Length > 0 ? shown : text, Font, Brushes.White, ClientRectangle, sf);
         }
 
         // 끌어서 옮기기 / 클릭하면 창 열기
@@ -406,13 +452,18 @@ namespace IpChanger
             if (tbw == IntPtr.Zero || !GetWindowRect(tbw, out tb)) { if (Visible) Hide(); return; }
 
             if (FullscreenAppActive()) { if (Visible) Hide(); return; }   // 전체화면 게임·영상 땐 숨김
-            if (!Visible) Show();
 
             bool horizontal = (tb.R - tb.L) > (tb.B - tb.T);
             int tbH = tb.B - tb.T;
             int h = horizontal ? Math.Max(S(22), Math.Min(S(30), tbH - S(12))) : S(26);
-            int w;
-            using (Graphics g = CreateGraphics()) w = (int)g.MeasureString(text, Font).Width + S(18);
+            int wFull, wShort;
+            using (Graphics g = CreateGraphics())
+            {
+                wFull = (int)g.MeasureString(text, Font).Width + S(18);
+                wShort = (int)g.MeasureString(compact, Font).Width + S(14);
+            }
+            int w = wFull;
+            string show = text;
             if (!horizontal) w = Math.Min(w, Math.Max(S(60), tb.R - tb.L - S(6)));
 
             int x, y;
@@ -420,13 +471,28 @@ namespace IpChanger
             if (off != null) { x = tb.R - off[0] - w; y = tb.T + off[1]; }
             else
             {
+                StartScanner();
                 RECT nr = new RECT();
                 IntPtr nw = FindWindowEx(tbw, IntPtr.Zero, "TrayNotifyWnd", null);
                 bool hasTray = nw != IntPtr.Zero && GetWindowRect(nw, out nr) && nr.R - nr.L > 0;
                 if (!hasTray) { nr.L = tb.R - S(240); nr.T = tb.B - S(120); nr.R = tb.R; nr.B = tb.B; }
-                if (horizontal) { x = nr.L - w - S(6); y = tb.T + (tbH - h) / 2; }
+                if (horizontal)
+                {
+                    y = tb.T + (tbH - h) / 2;
+                    int gap = S(6);
+                    int right = iconsRight, left = iconsLeft;
+                    int space = right < 0 ? int.MaxValue : nr.L - right - gap * 2;    // 앱 아이콘 끝 ~ 알림 영역 사이 빈 칸
+                    int leftSpace = left < 0 ? 0 : left - tb.L - gap * 2;            // 작업표시줄 왼쪽 빈 칸
+                    if (space >= wFull) { w = wFull; show = text; x = nr.L - w - gap; }                 // 1) 원래 자리
+                    else if (space >= wShort) { w = wShort; show = compact; x = nr.L - w - gap; }       // 2) 작게 줄여서
+                    else if (leftSpace >= wFull) { w = wFull; show = text; x = tb.L + gap; }           // 3) 왼쪽 빈 곳
+                    else if (leftSpace >= wShort) { w = wShort; show = compact; x = tb.L + gap; }
+                    else { if (Visible) Hide(); return; }   // 4) 자리가 없으면 숨김 (알림 아이콘에 표시됨)
+                }
                 else { x = tb.L + (tb.R - tb.L - w) / 2; y = nr.T - h - S(6); }
             }
+            if (show != shown) { shown = show; Invalidate(); }
+            if (!Visible) Show();
             SetWindowPos(Handle, new IntPtr(-1), x, y, w, h, 0x0010 | 0x0040);   // 항상 위, 포커스 안 뺏음
         }
     }
@@ -635,13 +701,71 @@ namespace IpChanger
             else if (lastPingMs == -2) { text = (tetherMode ? "테더링" : "유선") + " · 응답 없음"; c = Color.FromArgb(205, 45, 45); }
             else if (tetherMode) { text = "테더링 · " + ping; c = Color.FromArgb(124, 58, 237); }
             else { text = "유선 접속중 · " + ping; c = Color.FromArgb(26, 150, 75); }
-            box.SetStatus(text, c);
+            // 자리가 좁을 때 쓰는 짧은 글자
+            string shortText = busy ? (sw.Pending >= 0 ? "전환중" : "변경중") : (lastPingMs == -2 ? "끊김" : ping);
+            box.SetStatus(text, shortText, c);
             box.Tick();
             if (tray != null)
             {
                 string tip = "아이피 변경 — " + text;
                 tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
+
+                // 알림 아이콘에도 색 + 핑 숫자 표시
+                string iconText = busy ? "…" : (lastPingMs == -2 ? "!" : (lastPingMs >= 0 ? (lastPingMs > 999 ? "999" : lastPingMs.ToString()) : null));
+                SetTrayIcon(iconText, c);
             }
+        }
+
+        [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
+        IntPtr trayIconHandle = IntPtr.Zero;
+        string trayIconKey;
+
+        void SetTrayIcon(string t, Color c)
+        {
+            string key = t == null ? null : t + "|" + c.ToArgb();
+            if (key == trayIconKey) return;
+            trayIconKey = key;
+            IntPtr oldH = trayIconHandle;
+            if (t == null) { tray.Icon = Icon; trayIconHandle = IntPtr.Zero; }
+            else
+            {
+                Size sz = SystemInformation.SmallIconSize;
+                int n = Math.Max(16, sz.Width);
+                using (Bitmap bmp = new Bitmap(n, n))
+                {
+                    using (Graphics g = Graphics.FromImage(bmp))
+                    {
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                        g.Clear(Color.Transparent);
+                        float rad = n * 0.22f;
+                        using (GraphicsPath p = new GraphicsPath())
+                        {
+                            p.AddArc(0, 0, rad * 2, rad * 2, 180, 90);
+                            p.AddArc(n - 1 - rad * 2, 0, rad * 2, rad * 2, 270, 90);
+                            p.AddArc(n - 1 - rad * 2, n - 1 - rad * 2, rad * 2, rad * 2, 0, 90);
+                            p.AddArc(0, n - 1 - rad * 2, rad * 2, rad * 2, 90, 90);
+                            p.CloseFigure();
+                            using (SolidBrush b = new SolidBrush(c)) g.FillPath(b, p);
+                        }
+                        // 글자 수에 맞춰 크기 조절 (3자리도 칸 안에 들어가게)
+                        float fs = t.Length >= 3 ? n * 0.50f : n * 0.66f;
+                        using (Font f = new Font("Arial", fs, FontStyle.Bold, GraphicsUnit.Pixel))
+                        using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
+                        {
+                            SizeF ms = g.MeasureString(t, f);
+                            float k = Math.Min(1f, (n - 1) / ms.Width);
+                            if (k < 1f)
+                                using (Font f2 = new Font("Arial", fs * k, FontStyle.Bold, GraphicsUnit.Pixel))
+                                    g.DrawString(t, f2, Brushes.White, new RectangleF(0, 0.5f, n, n), sf);
+                            else g.DrawString(t, f, Brushes.White, new RectangleF(0, 0.5f, n, n), sf);
+                        }
+                    }
+                    trayIconHandle = bmp.GetHicon();
+                }
+                tray.Icon = System.Drawing.Icon.FromHandle(trayIconHandle);
+            }
+            if (oldH != IntPtr.Zero) DestroyIcon(oldH);
         }
 
         // ---------- 자동 업데이트 (GitHub 릴리스) ----------
